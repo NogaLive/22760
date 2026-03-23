@@ -16,6 +16,7 @@ from app.schemas.alumno import (
     AlumnoListResponse,
 )
 from app.services.qr_service import generate_qr_token, generate_qr_image
+from app.redis_client import invalidate_cache
 
 router = APIRouter(prefix="/api/alumnos", tags=["Alumnos"])
 
@@ -60,6 +61,75 @@ def listar_alumnos_por_grado(
     response = AlumnoListResponse(alumnos=result, total=len(result))
     set_cached(cache_key, response.model_dump(), ttl=300) # cache for 5 minutes
     return response
+
+
+@router.post("/importar/{grado_id}")
+def importar_alumnos(
+    grado_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Docente = Depends(get_current_user),
+):
+    """Importar alumnos masivamente desde un archivo Excel."""
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un Excel (.xlsx o .xls)")
+
+    grado = db.query(Grado).filter(Grado.id == grado_id).first()
+    if not grado:
+        raise HTTPException(status_code=404, detail="Grado no encontrado")
+
+    try:
+        contents = file.file.read()
+        wb = openpyxl.load_workbook(io.BytesIO(contents))
+        ws = wb.active
+
+        alumnos_creados = 0
+        errores = []
+
+        # Saltamos la cabecera (fila 1)
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if not row or not any(row): continue
+            
+            dni, nombres, apellidos = row[0:3]
+            
+            if not dni or not nombres or not apellidos:
+                errores.append(f"Fila {row_idx}: Datos incompletos")
+                continue
+
+            # Validar DNI existente
+            dni_str = str(dni).strip()
+            existing = db.query(Alumno).filter(Alumno.dni == dni_str).first()
+            if existing:
+                errores.append(f"Fila {row_idx}: DNI {dni_str} ya existe")
+                continue
+
+            # Crear alumno
+            qr_token = generate_qr_token()
+            nuevo_alumno = Alumno(
+                dni=dni_str,
+                nombres=str(nombres).strip(),
+                apellidos=str(apellidos).strip(),
+                grado_id=grado_id,
+                codigo_qr=qr_token,
+                activo=True
+            )
+            db.add(nuevo_alumno)
+            alumnos_creados += 1
+
+        db.commit()
+        
+        # Invalidar cache
+        invalidate_cache(f"alumnos:grado:{grado_id}")
+        invalidate_cache("dashboard:*")
+
+        return {
+            "message": f"Se han importado {alumnos_creados} alumnos exitosamente.",
+            "errores": errores
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
 
 @router.get("/modelo-excel", response_class=Response)
 def descargar_modelo_excel():
