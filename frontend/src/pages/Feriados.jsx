@@ -44,19 +44,9 @@ const Feriados = () => {
       const res = await apiClient.get('/feriados');
 
       const allData = res.data;
-
-      // Separar los límites escolares de los feriados regulares
+      // Filter out any academic boundaries that might be in the feriados list (legacy)
       const regulares = allData.filter(f => f.tipo !== 'inicio_escolar' && f.tipo !== 'fin_escolar');
-      const inicio = allData.find(f => f.tipo === 'inicio_escolar');
-      const fin = allData.find(f => f.tipo === 'fin_escolar');
-
       setFeriados(regulares);
-      setInicioEscolar(inicio);
-      setFinEscolar(fin);
-
-      if (inicio) setFechaInicio(inicio.fecha);
-      if (fin) setFechaFin(fin.fecha);
-
     } catch (error) {
       console.error(error);
       Swal.fire('Error', 'No se pudieron cargar los feriados.', 'error');
@@ -82,6 +72,14 @@ const Feriados = () => {
       data.forEach(c => {
         if (newHorarios.hasOwnProperty(c.clave)) {
           newHorarios[c.clave] = c.valor;
+        }
+        if (c.clave === 'inicio_escolar') {
+            setFechaInicio(c.valor);
+            setInicioEscolar({ fecha: c.valor });
+        }
+        if (c.clave === 'fin_escolar') {
+            setFechaFin(c.valor);
+            setFinEscolar({ fecha: c.valor });
         }
       });
       setHorarios(newHorarios);
@@ -133,17 +131,9 @@ const Feriados = () => {
     }
 
     try {
-      // Intentar borrar la configuracion actual si existiera para este tipo (simplificando actualizacion)
-      const confActual = tipoConf === 'inicio_escolar' ? inicioEscolar : finEscolar;
-
-      if (confActual) {
-        await apiClient.delete(`/feriados/${confActual.fecha}`);
-      }
-
-      await apiClient.post('/feriados', {
-        fecha: valorFecha,
-        descripcion: desc,
-        tipo: tipoConf
+      await apiClient.put(`/configuracion/${tipoConf}`, { 
+        valor: valorFecha,
+        descripcion: desc 
       });
 
       Swal.fire({
@@ -155,7 +145,7 @@ const Feriados = () => {
         timer: 1500
       });
 
-      fetchFeriados();
+      fetchHorarios();
     } catch (error) {
       const msg = error.response?.data?.detail || 'Error al actualizar configuración.';
       Swal.fire('Error', msg, 'error');

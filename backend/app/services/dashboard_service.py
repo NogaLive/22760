@@ -7,10 +7,12 @@ from app.models.justificacion import Justificacion, TipoJustificacion
 from app.models.grado import Grado
 from app.schemas.dashboard import DashboardKPIs, DashboardChartData, DashboardResponse, RiesgoDesercionItem, RiesgoDesercionResponse
 from app.redis_client import get_cached, set_cached
+from app.models.configuracion import Configuracion
+from app.models.feriado import Feriado
 from app.utils.timezone import get_peru_today
 
 
-def _get_date_range(filtro: str) -> tuple[date, date]:
+def _get_date_range(db: Session, filtro: str) -> tuple[date, date]:
     """Get date range based on filter type."""
     hoy = get_peru_today()
     if filtro == "hoy":
@@ -22,8 +24,23 @@ def _get_date_range(filtro: str) -> tuple[date, date]:
         inicio = hoy.replace(day=1)
         return inicio, hoy
     elif filtro == "año":
-        inicio = hoy.replace(month=1, day=1)
-        return inicio, hoy
+        # Aligned with school year Configuration (stored as Global Configs now)
+        inicio_escolar = db.query(Configuracion).filter(Configuracion.clave == "inicio_escolar").first()
+        fin_escolar = db.query(Configuracion).filter(Configuracion.clave == "fin_escolar").first()
+        
+        # Parse dates from strings in Configuracion
+        from datetime import date as dt_date
+        try:
+            inicio = dt_date.fromisoformat(inicio_escolar.valor) if inicio_escolar else hoy.replace(month=3, day=1)
+        except:
+            inicio = hoy.replace(month=3, day=1)
+            
+        try:
+            fin = dt_date.fromisoformat(fin_escolar.valor) if fin_escolar else hoy.replace(month=12, day=20)
+        except:
+            fin = hoy.replace(month=12, day=20)
+            
+        return inicio, fin
     else:
         return hoy, hoy
 
@@ -36,13 +53,16 @@ def _calculate_kpis(
 ) -> DashboardKPIs:
     """Calculate KPI values using optimized single GROUP BY queries instead of multiple counts."""
     # Group Asistencia by estado
-    asist_q = db.query(Asistencia.estado, func.count(Asistencia.id)).filter(
+    asist_q = db.query(Asistencia.estado, func.count(Asistencia.id)).join(
+        Alumno, Asistencia.alumno_dni == Alumno.dni
+    ).filter(
         Asistencia.fecha >= fecha_inicio,
         Asistencia.fecha <= fecha_fin,
+        Alumno.activo == True,
     )
 
     if grado_ids:
-        asist_q = asist_q.join(Alumno, Asistencia.alumno_dni == Alumno.dni).filter(
+        asist_q = asist_q.filter(
             Alumno.grado_id.in_(grado_ids)
         )
 
@@ -55,12 +75,15 @@ def _calculate_kpis(
     total_registros = sum(estado_counts.values())
 
     # Group Justificacion by tipo
-    just_q = db.query(Justificacion.tipo, func.count(Justificacion.id)).filter(
+    just_q = db.query(Justificacion.tipo, func.count(Justificacion.id)).join(
+        Alumno, Justificacion.alumno_dni == Alumno.dni
+    ).filter(
         Justificacion.fecha >= fecha_inicio,
         Justificacion.fecha <= fecha_fin,
+        Alumno.activo == True,
     )
     if grado_ids:
-        just_q = just_q.join(Alumno, Justificacion.alumno_dni == Alumno.dni).filter(
+        just_q = just_q.filter(
             Alumno.grado_id.in_(grado_ids)
         )
 
@@ -80,6 +103,21 @@ def _calculate_kpis(
     porcentaje_tardanza = round((tardanzas / total) * 100, 1)
     porcentaje_inasistencia = round((inasistencias / total) * 100, 1)
     porcentaje_justificacion = round((justificaciones_count / total) * 100, 1)
+
+    # Averages logic: if more than 1 day, return averages
+    hoy = get_peru_today()
+    # For averages, we only count days that have actually passed (up to hoy)
+    # to avoid future 0s from skewing the average.
+    efectiva_fin = min(fecha_fin, hoy)
+    num_dias = (efectiva_fin - fecha_inicio).days + 1
+    
+    # We only divide if it's a multi-day filter and num_dias > 1
+    if num_dias > 1:
+        asistencias = round(asistencias / num_dias, 1)
+        tardanzas = round(tardanzas / num_dias, 1)
+        inasistencias = round(inasistencias / num_dias, 1)
+        just_tardanza = round(just_tardanza / num_dias, 1)
+        just_inasistencia = round(just_inasistencia / num_dias, 1)
 
     return DashboardKPIs(
         total_alumnos=total_alumnos,
@@ -108,6 +146,7 @@ def _calculate_chart_data(
     base_q = db.query(Asistencia).join(Alumno, Asistencia.alumno_dni == Alumno.dni).filter(
         Asistencia.fecha >= fecha_inicio,
         Asistencia.fecha <= fecha_fin,
+        Alumno.activo == True,
     )
 
     if grado_id:
@@ -194,7 +233,7 @@ def get_dashboard_general(
     if cached:
         return DashboardResponse(**cached)
 
-    fecha_inicio, fecha_fin = _get_date_range(filtro)
+    fecha_inicio, fecha_fin = _get_date_range(db, filtro)
     kpis = _calculate_kpis(db, fecha_inicio, fecha_fin, grado_ids=grado_ids)
     chart_data = _calculate_chart_data(db, fecha_inicio, fecha_fin, grado_ids=grado_ids)
 
@@ -223,7 +262,7 @@ def get_dashboard_grado(
     grado = db.query(Grado).filter(Grado.id == grado_id).first()
     grado_nombre = grado.nombre if grado else "Desconocido"
 
-    fecha_inicio, fecha_fin = _get_date_range(filtro)
+    fecha_inicio, fecha_fin = _get_date_range(db, filtro)
     kpis = _calculate_kpis(db, fecha_inicio, fecha_fin, grado_ids=[grado_id])
     chart_data = _calculate_chart_data(db, fecha_inicio, fecha_fin, grado_id=grado_id)
 

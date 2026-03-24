@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
             ("hora_entrada_primaria", "07:30:00", "Inicio de Escaneo (Primaria)"),
             ("hora_asistencia_primaria", "08:00:00", "Inicio de Tardanza (Primaria)"),
             ("hora_tardanza_primaria", "09:00:00", "Inicio de Falta (Primaria)"),
+            ("inicio_escolar", "2026-03-01", "Fecha de Inicio del Año Escolar"),
+            ("fin_escolar", "2026-12-20", "Fecha de Finalización del Año Escolar"),
         ]
         for clave, valor, desc in defaults:
             exists = db.query(Configuracion).filter(Configuracion.clave == clave).first()

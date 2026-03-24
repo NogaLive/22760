@@ -28,12 +28,6 @@ def listar_alumnos_por_grado(
     current_user: Docente = Depends(get_current_user),
 ):
     """Listar todos los alumnos de un grado."""
-    from app.redis_client import get_cached, set_cached
-    cache_key = f"alumnos:grado:{grado_id}"
-    cached = get_cached(cache_key)
-    if cached:
-        return AlumnoListResponse(**cached)
-
     grado = db.query(Grado).filter(Grado.id == grado_id).first()
     if not grado:
         raise HTTPException(status_code=404, detail="Grado no encontrado")
@@ -58,9 +52,7 @@ def listar_alumnos_por_grado(
         for a in alumnos
     ]
 
-    response = AlumnoListResponse(alumnos=result, total=len(result))
-    set_cached(cache_key, response.model_dump(), ttl=300) # cache for 5 minutes
-    return response
+    return AlumnoListResponse(alumnos=result, total=len(result))
 
 
 @router.post("/importar/{grado_id}")
@@ -179,16 +171,35 @@ def crear_alumno(
     """Crear un nuevo alumno y generar su código QR automáticamente."""
     # Check if DNI already exists
     existing = db.query(Alumno).filter(Alumno.dni == request.dni).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Ya existe un alumno con DNI {request.dni}",
-        )
-
     # Verify grado exists
     grado = db.query(Grado).filter(Grado.id == request.grado_id).first()
     if not grado:
         raise HTTPException(status_code=404, detail="Grado no encontrado")
+
+    if existing:
+        if existing.activo:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ya existe un alumno ACTIVO con DNI {request.dni}",
+            )
+        else:
+            # Re-activate and update data
+            existing.activo = True
+            existing.nombres = request.nombres
+            existing.apellidos = request.apellidos
+            existing.grado_id = request.grado_id
+            db.commit()
+            db.refresh(existing)
+            invalidate_cache("dashboard:*")
+            return AlumnoOut(
+                dni=existing.dni,
+                nombres=existing.nombres,
+                apellidos=existing.apellidos,
+                grado_id=existing.grado_id,
+                grado_nombre=grado.nombre,
+                codigo_qr=existing.codigo_qr,
+                activo=existing.activo,
+            )
 
     # Generate unique QR token
     qr_token = generate_qr_token()
@@ -205,6 +216,9 @@ def crear_alumno(
     db.add(alumno)
     db.commit()
     db.refresh(alumno)
+
+    # Invalidate cache
+    invalidate_cache("dashboard:*")
 
     return AlumnoOut(
         dni=alumno.dni,
@@ -247,6 +261,10 @@ def actualizar_alumno(
     db.commit()
     db.refresh(alumno)
 
+    # Invalidate cache
+    invalidate_cache(f"alumnos:grado:{alumno.grado_id}")
+    invalidate_cache("dashboard:*")
+
     grado = db.query(Grado).filter(Grado.id == alumno.grado_id).first()
 
     return AlumnoOut(
@@ -273,6 +291,11 @@ def eliminar_alumno(
 
     alumno.activo = False
     db.commit()
+
+    # Invalidate cache
+    invalidate_cache(f"alumnos:grado:{alumno.grado_id}")
+    invalidate_cache("dashboard:*")
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

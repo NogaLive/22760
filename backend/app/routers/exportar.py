@@ -70,7 +70,7 @@ def exportar_asistencia_general(
             
     try:
         from app.services.dashboard_service import _get_date_range
-        fecha_inicio, fecha_fin = _get_date_range(periodo)
+        fecha_inicio, fecha_fin = _get_date_range(db, periodo)
         
         from app.services.export_service import generar_excel_general
         excel_file, _ = generar_excel_general(db, grado_ids, fecha_inicio, fecha_fin)
@@ -92,6 +92,7 @@ def exportar_asistencia_general(
 def exportar_justificaciones_grado(
     grado_id: int,
     tipo: str | None = None,
+    base_url: str | None = None,
     db: Session = Depends(get_db),
     current_user: Docente = Depends(get_current_user),
 ):
@@ -105,7 +106,7 @@ def exportar_justificaciones_grado(
             
     try:
         from app.services.export_service import generar_excel_justificaciones
-        excel_file, grado_nombre = generar_excel_justificaciones(db, grado_id, tipo)
+        excel_file, grado_nombre = generar_excel_justificaciones(db, grado_id, tipo, base_url)
         
         filename = f"justificaciones_{grado_nombre.replace(' ', '_')}_{get_peru_today().strftime('%Y%m%d')}.xlsx"
 

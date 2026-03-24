@@ -28,27 +28,55 @@ def registrar_asistencia_por_qr(
     hoy = ahora_dt.date()
     ahora = ahora_dt.time()
 
-    # Restricciones de Año Escolar
-    inicio_escolar = db.query(Feriado).filter(Feriado.tipo == 'inicio_escolar').first()
-    fin_escolar = db.query(Feriado).filter(Feriado.tipo == 'fin_escolar').first()
-
-    if inicio_escolar and hoy < inicio_escolar.fecha:
+    # Find student by QR code (Moved up to avoid UnboundLocalError)
+    alumno = db.query(Alumno).filter(Alumno.codigo_qr == codigo_qr, Alumno.activo == True).first()
+    if not alumno:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El Año Escolar aún no ha comenzado. (Inicia: {inicio_escolar.fecha})"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alumno no encontrado o código QR inválido",
         )
+
+    # Security Check: Docentes only scan their assigned grades. Director can scan everyone. (Moved up)
+    docente = db.query(Docente).filter(Docente.dni == docente_dni).first()
+    if not docente:
+        raise HTTPException(status_code=404, detail="Docente que registra no encontrado")
     
-    if fin_escolar and hoy > fin_escolar.fecha:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El Año Escolar ya ha finalizado. (Finalizó: {fin_escolar.fecha})"
-        )
+    if docente.rol == RolDocente.docente:
+        grado_ids_asignados = [g.id for g in docente.grados]
+        if alumno.grado_id not in grado_ids_asignados:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"No tiene permisos para registrar asistencia a alumnos de otros grados (ID Alumno: {alumno.grado_id})."
+            )
 
-    # Verificar si es un Feriado Institucional o Nacional explícitamente excluyendo las configs
-    feriado_hoy = db.query(Feriado).filter(
-        Feriado.fecha == hoy,
-        not_(Feriado.tipo.in_(['inicio_escolar', 'fin_escolar']))
-    ).first()
+    # Restricciones de Año Escolar (desde Configuracion)
+    inicio_escolar_cfg = db.query(Configuracion).filter(Configuracion.clave == 'inicio_escolar').first()
+    fin_escolar_cfg = db.query(Configuracion).filter(Configuracion.clave == 'fin_escolar').first()
+
+    if inicio_escolar_cfg:
+        try:
+            fecha_inicio = date.fromisoformat(inicio_escolar_cfg.valor)
+            if hoy < fecha_inicio:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El Año Escolar aún no ha comenzado. (Inicia: {fecha_inicio.strftime('%d/%m/%Y')})"
+                )
+        except ValueError:
+            pass
+    
+    if fin_escolar_cfg:
+        try:
+            fecha_fin = date.fromisoformat(fin_escolar_cfg.valor)
+            if hoy > fecha_fin:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El Año Escolar ya ha finalizado. (Finalizó: {fecha_fin.strftime('%d/%m/%Y')})"
+                )
+        except ValueError:
+            pass
+
+    # Verificar si es un Feriado Institucional o Nacional
+    feriado_hoy = db.query(Feriado).filter(Feriado.fecha == hoy).first()
     
     if feriado_hoy:
         raise HTTPException(
@@ -121,26 +149,6 @@ def registrar_asistencia_por_qr(
             estado_enum = EstadoAsistencia.inasistencia # Marked as Lack after 9:00 AM
 
 
-    # Find student by QR code
-    alumno = db.query(Alumno).filter(Alumno.codigo_qr == codigo_qr, Alumno.activo == True).first()
-    if not alumno:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Alumno no encontrado o código QR inválido",
-        )
-
-    # Security Check: Docentes only scan their assigned grades. Director can scan everyone.
-    docente = db.query(Docente).filter(Docente.dni == docente_dni).first()
-    if not docente:
-        raise HTTPException(status_code=404, detail="Docente que registra no encontrado")
-    
-    if docente.rol == RolDocente.docente:
-        grado_ids_asignados = [g.id for g in docente.grados]
-        if alumno.grado_id not in grado_ids_asignados:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"No tiene permisos para registrar asistencia a alumnos de otros grados (ID Alumno: {alumno.grado_id})."
-            )
 
     # Check if already registered today
     existing = (
@@ -179,6 +187,84 @@ def registrar_asistencia_por_qr(
         mensaje=f"Asistencia registrada para {alumno.nombres} {alumno.apellidos}",
     )
 
+def auto_marcar_faltas(db: Session, grado_id: int, hoy: date):
+    """
+    Internal trigger to automatically create 'inasistencia' records for students
+    who haven't been marked by the daily 'Falta' threshold.
+    """
+    # 1. Basic validation: is it a school day?
+    if hoy.weekday() >= 5:
+        # Weekend: Only if it's a recovery day
+        if not db.query(DiaRecuperacion).filter(DiaRecuperacion.fecha == hoy).first():
+            return
+    
+    if db.query(Feriado).filter(Feriado.fecha == hoy).first():
+        return
+
+    # 2. Get the threshold time for this grade
+    grado_item = db.query(Alumno).filter(Alumno.grado_id == grado_id).first()
+    if not grado_item or not grado_item.grado:
+        return
+    
+    from app.models.grado import NivelGrado
+    nivel = grado_item.grado.nivel
+    clave_falta = "hora_tardanza_inicial" if nivel == NivelGrado.inicial else "hora_tardanza_primaria"
+    
+    conf_falta = db.query(Configuracion).filter(Configuracion.clave == clave_falta).first()
+    try:
+        h_falta = datetime.strptime(conf_falta.valor, "%H:%M:%S").time() if conf_falta else time(9, 0)
+    except:
+        h_falta = time(9, 0)
+
+    # 3. Check if time has passed
+    ahora_dt = get_peru_now()
+    if ahora_dt.date() != hoy or ahora_dt.time() < h_falta:
+        return # Not time yet or not checking for today
+
+    # 4. Find students without attendance records for today
+    # Using a select for efficiency and to avoid SAWarning
+    from sqlalchemy import select
+    existing_DNIs = select(Asistencia.alumno_dni).where(Asistencia.fecha == hoy)
+    
+    missing_students = (
+        db.query(Alumno)
+        .filter(
+            Alumno.grado_id == grado_id,
+            Alumno.activo == True,
+            not_(Alumno.dni.in_(existing_DNIs))
+        )
+        .all()
+    )
+
+    if not missing_students:
+        return
+
+    # 5. Get a system registrar (Director)
+    # Using a literal DNI if possible or finding the first director
+    director = db.query(Docente).filter(Docente.rol == "director").first()
+    registrado_por = director.dni if director else 1 # Fallback to 1 if no director
+
+    # 6. Create mass 'inasistencia' records
+    print(f"DEBUG [Auto-Falta]: Marking {len(missing_students)} students as ABSENT for grade {grado_id}")
+    for student in missing_students:
+        asistencia = Asistencia(
+            alumno_dni=student.dni,
+            fecha=hoy,
+            estado=EstadoAsistencia.inasistencia,
+            registrado_por=registrado_por,
+            hora_registro=h_falta # Register at the threshold time
+        )
+        db.add(asistencia)
+    
+    try:
+        db.commit()
+        # Invalidate dashboard cache since we added records
+        invalidate_cache("dashboard:*")
+        print(f"DEBUG [Auto-Falta]: Success.")
+    except Exception as e:
+        db.rollback()
+        print(f"DEBUG [Auto-Falta]: Error during commit: {str(e)}")
+
 
 def listar_asistencias_por_grado(
     db: Session,
@@ -186,22 +272,21 @@ def listar_asistencias_por_grado(
     fecha: date | None = None,
 ) -> AsistenciaListResponse:
     """List attendance records for a grade, optionally filtered by date."""
-    from app.redis_client import get_cached, set_cached
-    cache_key = f"asistencia:grado:{grado_id}:{fecha}"
-    cached = get_cached(cache_key)
-    if cached:
-        return AsistenciaListResponse(**cached)
+    hoy = get_peru_today()
+    target_date = fecha if fecha else hoy
+
+    # Active Trigger: If checking today and deadline passed, auto-mark missing as absent
+    if target_date == hoy:
+        auto_marcar_faltas(db, grado_id, hoy)
 
     query = (
         db.query(Asistencia)
         .join(Alumno, Asistencia.alumno_dni == Alumno.dni)
-        .filter(Alumno.grado_id == grado_id)
+        .filter(Alumno.grado_id == grado_id, Asistencia.fecha == target_date)
     )
 
-    if fecha:
-        query = query.filter(Asistencia.fecha == fecha)
-
-    asistencias = query.order_by(Asistencia.fecha.desc(), Alumno.apellidos).all()
+    asistencias = query.order_by(Alumno.apellidos).all()
+    print(f"DEBUG [AsistenciaService]: Found {len(asistencias)} records for grade {grado_id} on {target_date}.")
 
     result = []
     for a in asistencias:
@@ -218,9 +303,7 @@ def listar_asistencias_por_grado(
             )
         )
 
-    response = AsistenciaListResponse(asistencias=result, total=len(result))
-    set_cached(cache_key, response.model_dump(), ttl=60) # cache for 60s
-    return response
+    return AsistenciaListResponse(asistencias=result, total=len(result))
 
 
 def modificar_asistencia(

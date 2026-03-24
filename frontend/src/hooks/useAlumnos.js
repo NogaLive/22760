@@ -45,5 +45,18 @@ export const useAlumnos = () => {
     setLoading(false);
   }, [fetchAlumnosByGrado, fetchAsistenciasHoy]);
 
-  return { loading, alumnos, asistenciasHoy, loadRosterInfo };
+  // Optimistic update
+  const updateAsistenciaLocal = useCallback((dni, nuevoEstado) => {
+    setAsistenciasHoy(prev => {
+      const exists = prev.find(a => String(a.alumno_dni) === String(dni));
+      if (exists) {
+        return prev.map(a => String(a.alumno_dni) === String(dni) ? { ...a, estado: nuevoEstado } : a);
+      } else {
+        return [...prev, { alumno_dni: dni, estado: nuevoEstado, fecha: new Date().toISOString().split('T')[0] }];
+      }
+    });
+  }, []);
+
+  return { loading, alumnos, asistenciasHoy, loadRosterInfo, updateAsistenciaLocal };
 };
+

@@ -5,8 +5,11 @@ from datetime import date
 from app.database import get_db
 from app.models.feriado import Feriado
 from app.models.docente import Docente
+from app.models.configuracion import Configuracion
 from app.schemas.feriado import FeriadoCreate, FeriadoOut
 from app.middleware.auth_middleware import get_current_user, require_director
+from app.redis_client import invalidate_cache
+from app.utils.timezone import get_peru_today
 
 router = APIRouter(prefix="/api/feriados", tags=["Feriados"])
 
@@ -23,6 +26,26 @@ def crear_feriado(
     director: Docente = Depends(require_director)
 ):
     """Crear un nuevo feriado (Solo Directores)."""
+    # Intercept school year configurations to avoid ENUM error
+    if feriado_in.tipo in ["inicio_escolar", "fin_escolar"]:
+        config = db.query(Configuracion).filter(Configuracion.clave == feriado_in.tipo).first()
+        if config:
+            config.valor = str(feriado_in.fecha)
+            config.descripcion = feriado_in.descripcion
+        else:
+            db.add(Configuracion(clave=feriado_in.tipo, valor=str(feriado_in.fecha), descripcion=feriado_in.descripcion))
+        db.commit()
+        invalidate_cache("dashboard:*")
+        # Return a mock FeriadoOut to satisfy the return type
+        return Feriado(
+            id=0,
+            fecha=feriado_in.fecha,
+            descripcion=feriado_in.descripcion,
+            tipo="institucional",
+            registrado_por=director.dni,
+            created_at=get_peru_today()
+        )
+
     # Ver si ya existe
     existe = db.query(Feriado).filter(Feriado.fecha == feriado_in.fecha).first()
     if existe:

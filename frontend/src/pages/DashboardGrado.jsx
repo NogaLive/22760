@@ -20,6 +20,7 @@ import {
     Title,
     Tooltip,
     Legend,
+    Filler
 } from 'chart.js';
 import { Line, Bar, Pie } from 'react-chartjs-2';
 import apiClient from '../api/client';
@@ -34,29 +35,43 @@ ChartJS.register(
     ArcElement,
     Title,
     Tooltip,
-    Legend
+    Legend,
+    Filler
 );
 
 const DashboardGrado = () => {
     const { gradoId } = useParams();
     const { loading: dashLoading, data: dashData, error, fetchDashboardGrado } = useDashboard();
-    const { loading: rosterLoading, alumnos, asistenciasHoy, loadRosterInfo } = useAlumnos();
+    const { loading: rosterLoading, alumnos, asistenciasHoy, loadRosterInfo, updateAsistenciaLocal } = useAlumnos();
 
     // Settings state
     const [chartType, setChartType] = useState('line');
+    const [periodo, setPeriodo] = useState('hoy');
 
     // Modals state
     const [modalAlumnoOpen, setModalAlumnoOpen] = useState(false);
     const [alumnoToEdit, setAlumnoToEdit] = useState(null);
 
     const [modalJustificacionOpen, setModalJustificacionOpen] = useState(false);
+    const [justificacionToEdit, setJustificacionToEdit] = useState(null);
     const [modalJustificacionesListaOpen, setModalJustificacionesListaOpen] = useState(false);
+
+    const handleEditJustificacion = (justificacion) => {
+        setJustificacionToEdit(justificacion);
+        setModalJustificacionesListaOpen(false);
+        setModalJustificacionOpen(true);
+    };
+
+    const openNewJustificationModal = () => {
+        setJustificacionToEdit(null);
+        setModalJustificacionOpen(true);
+    };
 
     const [qrModalOpen, setQrModalOpen] = useState(false);
     const [qrAlumno, setQrAlumno] = useState(null);
 
     const refreshData = () => {
-        fetchDashboardGrado(gradoId, 'semana');
+        fetchDashboardGrado(gradoId, periodo);
         loadRosterInfo(gradoId);
     };
 
@@ -115,61 +130,103 @@ const DashboardGrado = () => {
             setIsGeneratingPdf(true);
             const { jsPDF } = await import('jspdf');
 
-            const doc = new jsPDF();
-            let x = 15;
-            let y = 15;
-            const cardWidth = 85;
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            let x = 10;
+            let y = 10;
+            const cardWidth = 90;
             const cardHeight = 55;
+            const spacing = 8;
+            const schoolName = "I.E. N° 22760";
+            const currentYear = new Date().getFullYear();
 
             for (let i = 0; i < alumnos.length; i++) {
                 const alumno = alumnos[i];
 
-                doc.setDrawColor(31, 78, 121);
-                doc.setLineWidth(0.5);
-                doc.roundedRect(x, y, cardWidth, cardHeight, 3, 3);
+                // 1. Draw Card Background & Border
+                doc.setDrawColor(226, 232, 240); // Subtle slate-200 border
+                doc.setLineWidth(0.3);
+                doc.setFillColor(255, 255, 255);
+                doc.roundedRect(x, y, cardWidth, cardHeight, 4, 4, 'FD');
 
-                doc.setFillColor(31, 78, 121);
-                doc.roundedRect(x, y, cardWidth, 12, 3, 3, 'F');
-                doc.rect(x, y + 8, cardWidth, 4, 'F');
+                // 2. Premium Header Bar
+                doc.setFillColor(31, 78, 121); // Primary blue
+                doc.roundedRect(x, y, cardWidth, 14, 4, 4, 'F');
+                doc.rect(x, y + 10, cardWidth, 4, 'F'); // Square edges for the bottom of header
 
+                // 3. Header Text
                 doc.setTextColor(255, 255, 255);
                 doc.setFontSize(10);
                 doc.setFont("helvetica", "bold");
-                doc.text("I.E N°22760 - CARNET", x + cardWidth / 2, y + 8, { align: "center" });
+                doc.text(schoolName, x + cardWidth / 2, y + 9, { align: "center" });
 
-                doc.setTextColor(0, 0, 0);
-                doc.setFontSize(11);
+                // 4. Student Name (Multi-line support)
+                doc.setTextColor(31, 78, 121); // Primary blue for name
+                doc.setFontSize(12);
                 doc.setFont("helvetica", "bold");
-                const titleText = `${alumno.apellidos}, ${alumno.nombres}`;
-                // truncate if too long
-                const safeTitle = titleText.length > 25 ? titleText.substring(0, 25) + "..." : titleText;
-                doc.text(safeTitle, x + 5, y + 25);
+                
+                const fullName = `${alumno.apellidos.toUpperCase()}, ${alumno.nombres}`;
+                const lines = doc.splitTextToSize(fullName, 55); // Width allowed for text
+                doc.text(lines, x + 6, y + 23);
 
+                // 5. Student Details
+                const nameHeight = lines.length * 5; // Estimate height based on lines
+                const detailsY = Math.max(y + 23 + nameHeight + 2, y + 35);
+
+                doc.setTextColor(71, 85, 105); // Slate-600
                 doc.setFontSize(9);
+                doc.setFont("helvetica", "bold");
+                doc.text("DNI:", x + 6, detailsY);
                 doc.setFont("helvetica", "normal");
-                doc.text(`DNI: ${alumno.dni}`, x + 5, y + 40);
-                doc.text(`Grado: ${dashData?.grado_nombre || ''}`, x + 5, y + 45);
+                doc.text(String(alumno.dni), x + 15, detailsY);
 
+                doc.setFont("helvetica", "bold");
+                doc.text("Grado:", x + 6, detailsY + 5);
+                doc.setFont("helvetica", "normal");
+                doc.text(dashData?.grado_nombre || '-', x + 18, detailsY + 5);
+
+                doc.setFont("helvetica", "bold");
+                doc.text("Vigencia:", x + 6, detailsY + 10);
+                doc.setFont("helvetica", "normal");
+                doc.text(String(currentYear), x + 22, detailsY + 10);
+
+                // 6. Accent Bottom Line
+                doc.setDrawColor(31, 78, 121);
+                doc.setLineWidth(1.5);
+                doc.line(x + 6, y + cardHeight - 6, x + 25, y + cardHeight - 6);
+
+                // 7. QR Code Implementation
                 const base64Qr = await getBase64QrFromApi(alumno.dni);
                 if (base64Qr) {
-                    doc.addImage(base64Qr, 'PNG', x + cardWidth - 28, y + 18, 25, 25);
+                    // White container for QR for better scanning
+                    doc.setDrawColor(241, 245, 249);
+                    doc.setLineWidth(0.2);
+                    doc.setFillColor(255, 255, 255);
+                    doc.roundedRect(x + cardWidth - 32, y + 18, 28, 28, 2, 2, 'FD');
+                    
+                    doc.addImage(base64Qr, 'PNG', x + cardWidth - 30.5, y + 19.5, 25, 25);
                 }
 
-                x += cardWidth + 10;
-                if (x > 200 - cardWidth) {
-                    x = 15;
-                    y += cardHeight + 10;
+                // 8. Layout Logic for Printing Page
+                x += cardWidth + spacing;
+                if (x + cardWidth > 210) { // Page width limit (A4 ~210mm)
+                    x = 10;
+                    y += cardHeight + spacing;
                 }
 
-                if (y > 280 - cardHeight && i < alumnos.length - 1) {
+                if (y + cardHeight > 297 - spacing && i < alumnos.length - 1) { // Page height limit (A4 ~297mm)
                     doc.addPage();
-                    x = 15;
-                    y = 15;
+                    x = 10;
+                    y = 10;
                 }
             }
 
-            doc.save(`Carnets_${dashData?.grado_nombre}.pdf`);
-            Swal.fire('¡Éxito!', 'Los carnets han sido generados.', 'success');
+            doc.save(`Carnets_${dashData?.grado_nombre || 'IE22760'}.pdf`);
+            Swal.fire('¡Éxito!', 'Los carnets han sido generados con el nuevo diseño.', 'success');
         } catch (err) {
             console.error(err);
             Swal.fire('Error', 'Hubo un error al generar el PDF.', 'error');
@@ -264,7 +321,7 @@ const DashboardGrado = () => {
     };
 
     const getRecordValue = (dni) => {
-        const record = (asistenciasHoy || []).find(a => a.alumno_dni === dni);
+        const record = (asistenciasHoy || []).find(a => String(a.alumno_dni) === String(dni));
         return record ? record.estado : 'sin_marcar';
     };
 
@@ -279,21 +336,18 @@ const DashboardGrado = () => {
     };
 
     const handleInlineStatusChange = async (dni, nuevoEstado) => {
+        const estadoAnterior = getRecordValue(dni);
+        updateAsistenciaLocal(dni, nuevoEstado);
+
         try {
             await apiClient.post(`/asistencia/override`, {
                 alumno_dni: dni,
                 estado: nuevoEstado
             });
-            Swal.fire({
-                toast: true,
-                position: 'top-end',
-                icon: 'success',
-                title: 'Estado Actualizado',
-                showConfirmButton: false,
-                timer: 1500
-            });
-            refreshData();
+            // Background refresh dashboard (don't show local spinner)
+            fetchDashboardGrado(gradoId, periodo);
         } catch (error) {
+            updateAsistenciaLocal(dni, estadoAnterior);
             const msg = error.response?.data?.detail || 'Error modificando asistencia';
             Swal.fire({ title: 'Error', text: msg, icon: 'error', confirmButtonColor: '#1F4E79' });
         }
@@ -314,7 +368,9 @@ const DashboardGrado = () => {
             try {
                 await apiClient.delete(`/alumnos/${dni}`);
                 Swal.fire('Eliminado', 'El alumno ha sido eliminado.', 'success');
+                // Refresh both roster and dashboard KPIs/Charts
                 loadRosterInfo(gradoId);
+                fetchDashboardGrado(gradoId, periodo);
             } catch (err) {
                 Swal.fire('Error', 'No se pudo eliminar al alumno.', 'error');
             }
@@ -338,8 +394,11 @@ const DashboardGrado = () => {
                         <select
                             className="form-select font-sans text-xs sm:text-sm h-full shrink-0"
                             style={{ width: '130px', padding: '0.5rem 1.5rem 0.5rem 0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}
-                            onChange={(e) => fetchDashboardGrado(gradoId, e.target.value)}
-                            defaultValue="semana"
+                            value={periodo}
+                            onChange={(e) => {
+                                setPeriodo(e.target.value);
+                                fetchDashboardGrado(gradoId, e.target.value);
+                            }}
                         >
                             <option value="hoy">Hoy</option>
                             <option value="semana">Esta Semana</option>
@@ -350,7 +409,7 @@ const DashboardGrado = () => {
                             <button className="btn btn-secondary flex justify-center items-center gap-1 bg-gray-200 border-gray-300 text-gray-800 text-xs sm:text-sm shrink-0" onClick={() => setModalJustificacionesListaOpen(true)} style={{ height: '36px', padding: '0 0.75rem' }}>
                                 <FileText size={14} /> Ver Justific.
                             </button>
-                            <button className="btn btn-secondary flex justify-center items-center gap-1 bg-gray-200 border-gray-300 text-gray-800 text-xs sm:text-sm shrink-0" onClick={() => setModalJustificacionOpen(true)} style={{ height: '36px', padding: '0 0.75rem' }}>
+                            <button className="btn btn-secondary flex justify-center items-center gap-1 bg-gray-200 border-gray-300 text-gray-800 text-xs sm:text-sm shrink-0" onClick={() => openNewJustificationModal()} style={{ height: '36px', padding: '0 0.75rem' }}>
                                 <Plus size={14} /> Nueva Justific.
                             </button>
                         </div>
@@ -467,16 +526,25 @@ const DashboardGrado = () => {
                                                         style={{
                                                             backgroundColor: getStatusColor(getRecordValue(alumno.dni)).bg,
                                                             color: getStatusColor(getRecordValue(alumno.dni)).text,
-                                                            borderColor: getStatusColor(getRecordValue(alumno.dni)).text
+                                                            borderColor: getStatusColor(getRecordValue(alumno.dni)).text,
+                                                            cursor: getRecordValue(alumno.dni) === 'justificacion' ? 'default' : 'pointer',
+                                                            opacity: getRecordValue(alumno.dni) === 'justificacion' ? 0.85 : 1
                                                         }}
                                                         value={getRecordValue(alumno.dni)}
                                                         onChange={(e) => handleInlineStatusChange(alumno.dni, e.target.value)}
+                                                        disabled={getRecordValue(alumno.dni) === 'justificacion'}
+                                                        title={getRecordValue(alumno.dni) === 'justificacion' ? "Este registro está justificado formalmente e inalterable." : ""}
                                                     >
-                                                        <option value="sin_marcar" disabled>Sin marcar</option>
-                                                        <option value="asistencia">Presente</option>
-                                                        <option value="tardanza">Tardanza</option>
-                                                        <option value="inasistencia">Inasistencia</option>
-                                                        <option value="justificacion">Justificado</option>
+                                                        {getRecordValue(alumno.dni) === 'justificacion' ? (
+                                                            <option value="justificacion">Justificado</option>
+                                                        ) : (
+                                                            <>
+                                                                <option value="sin_marcar" disabled>Sin marcar</option>
+                                                                <option value="asistencia">Presente</option>
+                                                                <option value="tardanza">Tardanza</option>
+                                                                <option value="inasistencia">Inasistencia</option>
+                                                            </>
+                                                        )}
                                                     </select>
                                                 </td>
                                                 <td>
@@ -585,14 +653,16 @@ const DashboardGrado = () => {
             />
             <ModalJustificacion
                 isOpen={modalJustificacionOpen}
-                onClose={() => setModalJustificacionOpen(false)}
+                onClose={() => { setModalJustificacionOpen(false); setJustificacionToEdit(null); }}
                 alumnos={alumnos}
+                justificacionEdit={justificacionToEdit}
                 onRefresh={refreshData}
             />
             <ModalJustificacionesLista
                 isOpen={modalJustificacionesListaOpen}
                 onClose={() => setModalJustificacionesListaOpen(false)}
                 gradoId={gradoId}
+                onEdit={handleEditJustificacion}
             />
             {/* QR Render Modal */}
             {qrModalOpen && qrAlumno && (

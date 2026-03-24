@@ -29,14 +29,29 @@ const EscanerQR = () => {
         showConfirmButton: false
       });
     } catch (error) {
+      const status = error.response?.status;
       const msg = error.response?.data?.detail || 'Código no válido o ya registrado';
-      const isSchedule = error.response?.status === 400 && msg.includes("horario");
-      await Swal.fire({
-        title: isSchedule ? '⏰ Fuera de Horario' : 'Atención',
-        text: msg,
-        icon: isSchedule ? 'warning' : 'error',
-        confirmButtonColor: '#1F4E79'
-      });
+      
+      if (status === 409 || msg.toLowerCase().includes('ya tiene registro')) {
+        await Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'info',
+          title: 'Asistencia ya registrada',
+          text: msg,
+          showConfirmButton: false,
+          timer: 3000,
+          timerProgressBar: true
+        });
+      } else {
+        const isSchedule = status === 400 && msg.includes("horario");
+        await Swal.fire({
+          title: isSchedule ? '⏰ Fuera de Horario' : 'Atención',
+          text: msg,
+          icon: isSchedule ? 'warning' : 'error',
+          confirmButtonColor: '#1F4E79'
+        });
+      }
     } finally {
       setTimeout(() => {
         processingRef.current = false;

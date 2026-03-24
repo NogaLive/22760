@@ -4,11 +4,11 @@ from typing import Optional
 
 class DashboardKPIs(BaseModel):
     total_alumnos: int
-    asistencias: int
-    tardanzas: int
-    inasistencias: int
-    justificaciones_tardanza: int
-    justificaciones_inasistencia: int
+    asistencias: float
+    tardanzas: float
+    inasistencias: float
+    justificaciones_tardanza: float
+    justificaciones_inasistencia: float
     porcentaje_asistencia: float
     porcentaje_tardanza: float
     porcentaje_inasistencia: float

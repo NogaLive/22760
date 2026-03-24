@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.models.asistencia import Asistencia
 from app.models.alumno import Alumno
 from app.models.grado import Grado
-from app.utils.timezone import get_peru_today # Added import
+from app.utils.timezone import get_peru_today
+from app.services.asistencia_service import auto_marcar_faltas
 
 def exportar_asistencias_excel(
     db: Session,
@@ -26,6 +27,10 @@ def exportar_asistencias_excel(
         fecha_inicio = peru_today.replace(day=1)
     if not fecha_fin:
         fecha_fin = peru_today
+
+    # Trigger auto-faltas if the report includes today
+    if fecha_inicio <= peru_today <= fecha_fin:
+        auto_marcar_faltas(db, grado_id, peru_today)
 
     # Query attendance data
     asistencias = (
@@ -160,6 +165,11 @@ def generar_excel_general(
         ws = wb.create_sheet(title="Vacio")
         ws.cell(row=1, column=1, value="No hay grados asignados")
     else:
+        # Trigger auto-faltas for all grades if today is in range
+        if fecha_inicio <= peru_today <= fecha_fin:
+            for g in grados:
+                auto_marcar_faltas(db, g.id, peru_today)
+
         for grado in grados:
             # Query attendance data for this grade
             asistencias = (
@@ -231,6 +241,7 @@ def generar_excel_justificaciones(
     db: Session,
     grado_id: int | None = None,
     tipo: str | None = None,
+    base_url: str | None = None,
 ) -> tuple[io.BytesIO, str]:
     """Export justification records as an Excel file with direct download links."""
     from app.models.justificacion import Justificacion, TipoJustificacion
@@ -285,17 +296,16 @@ def generar_excel_justificaciones(
         
         # Link to file
         if j.archivo_url:
-            # We don't know the full host easily here, so we provide the path. 
-            # In Excel, we can use the HYPERLINK function.
-            # Assuming the user opens this in a context where they have access to the app.
-            # For now, we'll put the relative URL and attempt to make it a link.
-            link_cell = ws.cell(row=row_idx, column=7, value="Descargar Archivo")
+            link_cell = ws.cell(row=row_idx, column=7, value="Ver Evidencia")
             link_cell.font = Font(color="0563C1", underline="single")
-            # We use a placeholder for the base URL that the user can adapt, or just the relative one.
-            # Most modern Excels handle relative links if the file is in the same folder, but here it's downloaded.
-            # Let's try to provide the full URL if possible? 
-            # Actually, let's just use the relative URL as the text and the hyperlink.
-            target = j.archivo_url # e.g. /uploads/abc.pdf
+            
+            # Use the new internal proxy endpoint for downloads
+            if base_url:
+                base = base_url.rstrip("/")
+                target = f"{base}/api/justificaciones/descargar/{j.id}"
+            else:
+                target = j.archivo_url
+                
             link_cell.hyperlink = target
         else:
             ws.cell(row=row_idx, column=7, value="Sin archivo").border = thin_border

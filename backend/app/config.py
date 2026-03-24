@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 480  # 8 horas
 
+    # Supabase Storage
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
+    SUPABASE_BUCKET: str = "justificaciones"
+    SUPABASE_REGION: str = "us-east-1"
+    S3_ACCESS_KEY: str
+    S3_SECRET_KEY: str
+
     @property
     def DATABASE_URL(self) -> str:
         return (
