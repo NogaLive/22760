@@ -257,7 +257,7 @@ const Feriados = () => {
           <div className="md:col-span-3 space-y-6">
 
             {/* 1. Configuración Global (Límites + Horarios) */}
-            <div className="card">
+            <div className="card mb-6">
               <div className="flex items-center gap-2 mb-6 border-b pb-2">
                 <Settings size={20} className="text-primary" />
                 <h2 className="font-heading text-lg m-0">Configuración Global Académica</h2>

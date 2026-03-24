@@ -388,7 +388,7 @@ const DashboardGrado = () => {
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4" style={{ padding: '1.5rem' }}>
                             <h3 className="font-heading text-primary m-0">Registro de Alumnos</h3>
 
-                            <div className="grid grid-cols-2 md:flex md:flex-row gap-2 w-full md:w-auto mt-4 md:mt-0">
+                            <div className="flex flex-row gap-2 items-center w-full md:w-auto mt-4 md:mt-0 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
                                 <input
                                     type="file"
                                     id="excel-upload"
@@ -397,7 +397,7 @@ const DashboardGrado = () => {
                                     onChange={handleImportExcel}
                                 />
                                 <button
-                                    className="btn btn-secondary flex justify-center items-center gap-1 opacity-90 hover:opacity-100 text-xs w-full md:w-auto"
+                                    className="btn btn-secondary flex justify-center items-center gap-1 opacity-90 hover:opacity-100 text-xs shrink-0"
                                     style={{ padding: '0 0.5rem', backgroundColor: '#f3f4f6', color: '#4b5563', borderColor: '#d1d5db', height: '36px' }}
                                     onClick={handleDownloadTemplate}
                                     title="Descargar Planilla Modelo"
@@ -406,7 +406,7 @@ const DashboardGrado = () => {
                                 </button>
 
                                 <button
-                                    className="btn btn-secondary flex justify-center items-center gap-1 opacity-90 hover:opacity-100 text-xs w-full md:w-auto"
+                                    className="btn btn-secondary flex justify-center items-center gap-1 opacity-90 hover:opacity-100 text-xs shrink-0"
                                     style={{ padding: '0 0.5rem', backgroundColor: '#e8f5e9', color: '#2e7d32', borderColor: '#c8e6c9', height: '36px' }}
                                     onClick={() => document.getElementById('excel-upload').click()}
                                     disabled={isImporting}
@@ -415,7 +415,7 @@ const DashboardGrado = () => {
                                 </button>
 
                                 <button
-                                    className="btn btn-secondary flex justify-center items-center gap-1 opacity-90 hover:opacity-100 text-xs w-full md:w-auto"
+                                    className="btn btn-secondary flex justify-center items-center gap-1 opacity-90 hover:opacity-100 text-xs shrink-0"
                                     style={{ padding: '0 0.5rem', backgroundColor: '#e3f2fd', color: '#1565c0', borderColor: '#bbdefb', height: '36px' }}
                                     onClick={handleGenerateCredenciales}
                                     disabled={isGeneratingPdf}
@@ -424,7 +424,7 @@ const DashboardGrado = () => {
                                 </button>
 
                                 <button
-                                    className="btn btn-secondary flex justify-center items-center gap-1 text-xs w-full md:w-auto"
+                                    className="btn btn-secondary flex justify-center items-center gap-1 text-xs shrink-0"
                                     style={{ padding: '0 0.5rem', height: '36px' }}
                                     onClick={() => { setAlumnoToEdit(null); setModalAlumnoOpen(true); }}
                                 >
