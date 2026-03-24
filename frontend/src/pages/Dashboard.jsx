@@ -45,7 +45,7 @@ const Dashboard = () => {
   const handleExportGeneral = async () => {
     try {
       const response = await apiClient.get(`/exportar/general?periodo=${periodo}`, {
-        responseType: 'blob' 
+        responseType: 'blob'
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
@@ -82,7 +82,7 @@ const Dashboard = () => {
     },
     scales: {
       y: { beginAtZero: true },
-      x: {} 
+      x: {}
     },
     tension: 0.3
   };
@@ -148,17 +148,17 @@ const Dashboard = () => {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-heading text-primary">Panel General Institucional</h1>
           <p className="text-muted text-sm">Resumen de asistencia de todos los grados</p>
         </div>
-        
+
         {/* Filtros */}
-        <div className="flex gap-4 items-center">
-          <select 
-            className="form-select font-sans text-sm h-full" 
-            style={{ width: '150px', padding: '0.625rem 2rem 0.625rem 1rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}
+        <div className="flex flex-row gap-2 items-center w-full md:w-auto mt-4 md:mt-0 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <select
+            className="form-select font-sans text-xs sm:text-sm h-full shrink-0"
+            style={{ width: '130px', padding: '0.5rem 1.5rem 0.5rem 0.75rem', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}
             onChange={(e) => setPeriodo(e.target.value)}
             value={periodo}
           >
@@ -168,14 +168,14 @@ const Dashboard = () => {
             <option value="año">Este Año</option>
           </select>
 
-          <button className="btn btn-primary flex items-center gap-2" onClick={handleExportGeneral} style={{ height: '100%', padding: '0.625rem 1rem' }}>
-            <FileDown size={16} /> Exportar Excel
+          <button className="btn btn-primary flex justify-center items-center gap-1 sm:gap-2 text-xs sm:text-sm shrink-0" onClick={handleExportGeneral} style={{ height: '36px', padding: '0 0.75rem' }}>
+            <FileDown size={14} /> Exportar Excel
           </button>
         </div>
       </div>
-      
+
       {/* KPIs */}
-      <div className="grid gap-4 mb-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+      <div className="grid gap-4 mb-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
         <div className="card text-center" style={{ borderTop: '4px solid var(--primary)' }}>
           <h3 className="text-muted text-sm uppercase">Total Alumnos</h3>
           <p className="text-2xl font-bold mt-2">{data?.kpis?.total_alumnos || 0}</p>
@@ -208,14 +208,14 @@ const Dashboard = () => {
         <RiesgoDesercionWidget />
       </div>
 
-      <div className="card" style={{ height: '450px', padding: '1.5rem 1.5rem 2rem 1.5rem', display: 'flex', flexDirection: 'column' }}>
-        <div className="flex justify-between items-center mb-4">
+      <div className="card" style={{ height: '450px', padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
+        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           <h3 className="font-heading text-primary m-0">Comparativa por Grados</h3>
-          
-          <div className="flex bg-gray-100 rounded-md p-1" style={{ backgroundColor: '#EDF2F7' }}>
-            <button 
+
+          <div className="flex bg-gray-100 rounded-md p-1 w-full sm:w-auto overflow-x-auto" style={{ backgroundColor: '#EDF2F7' }}>
+            <button
               onClick={() => setChartType('bar')}
-              style={{ 
+              style={{
                 background: chartType === 'bar' ? 'white' : 'transparent',
                 color: chartType === 'bar' ? 'var(--primary)' : 'var(--text-muted)',
                 border: 'none', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer',
@@ -225,9 +225,9 @@ const Dashboard = () => {
             >
               <BarChart3 size={16} />
             </button>
-            <button 
+            <button
               onClick={() => setChartType('line')}
-              style={{ 
+              style={{
                 background: chartType === 'line' ? 'white' : 'transparent',
                 color: chartType === 'line' ? 'var(--primary)' : 'var(--text-muted)',
                 border: 'none', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer',
@@ -237,9 +237,9 @@ const Dashboard = () => {
             >
               <LineChart size={16} />
             </button>
-            <button 
+            <button
               onClick={() => setChartType('pie')}
-              style={{ 
+              style={{
                 background: chartType === 'pie' ? 'white' : 'transparent',
                 color: chartType === 'pie' ? 'var(--primary)' : 'var(--text-muted)',
                 border: 'none', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer',
@@ -254,9 +254,9 @@ const Dashboard = () => {
 
         <div style={{ position: 'relative', flex: 1, width: '100%' }}>
           {data?.chart_data?.labels?.length > 0 ? (
-            chartType === 'line' ? <Line options={chartOptions} data={chartData} /> : 
-            chartType === 'bar' ? <Bar options={chartOptions} data={chartData} /> :
-            <Pie options={pieOptions} data={pieData} />
+            chartType === 'line' ? <Line options={chartOptions} data={chartData} /> :
+              chartType === 'bar' ? <Bar options={chartOptions} data={chartData} /> :
+                <Pie options={pieOptions} data={pieData} />
           ) : (
             <div className="flex items-center justify-center h-full text-muted">No hay datos para mostrar en este rango</div>
           )}

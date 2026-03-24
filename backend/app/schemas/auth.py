@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    dni: int = Field(..., description="DNI del docente (8 dígitos)")
+    dni: int = Field(..., description="DNI del docente (hasta 9 dígitos)")
     password: str = Field(..., min_length=6, max_length=6, description="Contraseña de 6 dígitos")
 
 

@@ -45,9 +45,9 @@ const RiesgoDesercionWidget = ({ gradoId }) => {
         </h3>
       </div>
       
-      <div className="max-h-60 overflow-y-auto">
+      <div className="max-h-60 overflow-y-auto table-responsive">
         <table className="w-full text-left text-sm">
-          <thead className="bg-red-50 text-red-700 sticky top-0 shadow-sm">
+          <thead className="bg-red-50 text-red-700 sticky top-0 shadow-sm z-10">
             <tr>
               <th className="p-2 pl-4 font-semibold">Alumno</th>
               <th className="p-2 font-semibold">Grado</th>

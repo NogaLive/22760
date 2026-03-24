@@ -225,3 +225,91 @@ def generar_excel_general(
     wb.save(buffer)
     buffer.seek(0)
     return buffer, "General"
+
+
+def generar_excel_justificaciones(
+    db: Session,
+    grado_id: int | None = None,
+    tipo: str | None = None,
+) -> tuple[io.BytesIO, str]:
+    """Export justification records as an Excel file with direct download links."""
+    from app.models.justificacion import Justificacion, TipoJustificacion
+    
+    query = db.query(Justificacion).join(Alumno, Justificacion.alumno_dni == Alumno.dni)
+    
+    grado_nombre = "Todos"
+    if grado_id:
+        query = query.filter(Alumno.grado_id == grado_id)
+        grado = db.query(Grado).filter(Grado.id == grado_id).first()
+        if grado:
+            grado_nombre = grado.nombre
+            
+    if tipo:
+        try:
+            tipo_enum = TipoJustificacion(tipo)
+            query = query.filter(Justificacion.tipo == tipo_enum)
+        except ValueError:
+            pass
+
+    justificaciones = query.order_by(Justificacion.fecha.desc()).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Justificaciones"
+
+    # Styles
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_alignment = Alignment(horizontal="center")
+    thin_border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
+
+    # Headers
+    headers = ["DNI", "Estudiante", "Grado", "Fecha", "Tipo", "Descripción", "Evidencia (Link)"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # Data
+    for row_idx, j in enumerate(justificaciones, 2):
+        ws.cell(row=row_idx, column=1, value=j.alumno_dni).border = thin_border
+        ws.cell(row=row_idx, column=2, value=f"{j.alumno.apellidos}, {j.alumno.nombres}").border = thin_border
+        ws.cell(row=row_idx, column=3, value=j.alumno.grado.nombre).border = thin_border
+        ws.cell(row=row_idx, column=4, value=j.fecha.strftime("%d/%m/%Y")).border = thin_border
+        
+        tipo_lbl = "Falta" if j.tipo.value == "justificacion_inasistencia" else "Tardanza"
+        ws.cell(row=row_idx, column=5, value=tipo_lbl).border = thin_border
+        ws.cell(row=row_idx, column=6, value=j.descripcion).border = thin_border
+        
+        # Link to file
+        if j.archivo_url:
+            # We don't know the full host easily here, so we provide the path. 
+            # In Excel, we can use the HYPERLINK function.
+            # Assuming the user opens this in a context where they have access to the app.
+            # For now, we'll put the relative URL and attempt to make it a link.
+            link_cell = ws.cell(row=row_idx, column=7, value="Descargar Archivo")
+            link_cell.font = Font(color="0563C1", underline="single")
+            # We use a placeholder for the base URL that the user can adapt, or just the relative one.
+            # Most modern Excels handle relative links if the file is in the same folder, but here it's downloaded.
+            # Let's try to provide the full URL if possible? 
+            # Actually, let's just use the relative URL as the text and the hyperlink.
+            target = j.archivo_url # e.g. /uploads/abc.pdf
+            link_cell.hyperlink = target
+        else:
+            ws.cell(row=row_idx, column=7, value="Sin archivo").border = thin_border
+
+    # Adjust widths
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 25
+    ws.column_dimensions["C"].width = 15
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 12
+    ws.column_dimensions["F"].width = 40
+    ws.column_dimensions["G"].width = 20
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer, grado_nombre

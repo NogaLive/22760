@@ -87,3 +87,32 @@ def exportar_asistencia_general(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al generar el archivo Excel general: {e}",
         )
+
+@router.get("/justificaciones/grado/{grado_id}")
+def exportar_justificaciones_grado(
+    grado_id: int,
+    tipo: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: Docente = Depends(get_current_user),
+):
+    """
+    Exporta las justificaciones de un grado en formato Excel con links de descarga.
+    """
+    if current_user.rol.value == "docente":
+        autorizado = any(g.id == grado_id for g in current_user.grados)
+        if not autorizado:
+            raise HTTPException(status_code=403, detail="No tiene permisos para este grado.")
+            
+    try:
+        from app.services.export_service import generar_excel_justificaciones
+        excel_file, grado_nombre = generar_excel_justificaciones(db, grado_id, tipo)
+        
+        filename = f"justificaciones_{grado_nombre.replace(' ', '_')}_{get_peru_today().strftime('%Y%m%d')}.xlsx"
+
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

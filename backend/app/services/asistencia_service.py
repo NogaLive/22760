@@ -6,6 +6,9 @@ from app.models.alumno import Alumno
 from app.models.asistencia import Asistencia, EstadoAsistencia
 from app.models.modificacion import ModificacionRegistro
 from app.models.feriado import Feriado
+from app.models.docente import Docente, RolDocente
+from app.models.configuracion import Configuracion
+from app.models.recuperacion import DiaRecuperacion
 from app.schemas.asistencia import (
     RegistrarAsistenciaResponse,
     AsistenciaOut,
@@ -53,11 +56,16 @@ def registrar_asistencia_por_qr(
             detail=f"Día Inactivo: {feriado_hoy.descripcion} (Feriado). No se pueden registrar asistencias."
         )
 
+    # Check if it's a working day (Mon-Fri) or a scheduled Recovery Day
     if hoy.weekday() >= 5:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Día no laborable: No se registran asistencias sábados ni domingos.",
-        )
+        # Weekend: Only allow if it's a scheduled recovery day
+        recup_hoy = db.query(DiaRecuperacion).filter(DiaRecuperacion.fecha == hoy).first()
+        if not recup_hoy:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Día No Laborable: Los fines de semana están bloqueados a menos que se programen como Día de Recuperación."
+            )
+
 
     # Resolve estado based on business logic if not explicitly forced by request
     if estado:
@@ -69,21 +77,49 @@ def registrar_asistencia_por_qr(
                 detail=f"Estado inválido: {estado}.",
             )
     else:
-        # Time logic checks -> 7:45 AM threshold inside school hours (7:00 AM -> 1:00 PM)
-        limite_tardanza = time(7, 45)
-        hora_inicio = time(7, 0)
+        # Dynamic Threshold Logic
+        from app.models.grado import NivelGrado
+        nivel = alumno.grado.nivel
+        
+        # Default fallback times if config is missing (safety)
+        if nivel == NivelGrado.inicial:
+            clave_entrada = "hora_entrada_inicial"
+            clave_tardanza = "hora_asistencia_inicial" # Threshold for Tardanza (starts at 8:15)
+            clave_falta = "hora_tardanza_inicial"      # Threshold for Falta (starts at 9:00)
+        else:
+            clave_entrada = "hora_entrada_primaria"
+            clave_tardanza = "hora_asistencia_primaria" # Threshold for Tardanza (starts at 8:00)
+            clave_falta = "hora_tardanza_primaria"      # Threshold for Falta (starts at 9:00)
+
+        conf_entrada = db.query(Configuracion).filter(Configuracion.clave == clave_entrada).first()
+        conf_tardanza = db.query(Configuracion).filter(Configuracion.clave == clave_tardanza).first()
+        conf_falta = db.query(Configuracion).filter(Configuracion.clave == clave_falta).first()
+        
+        # Parsing config strings "HH:MM:SS"
+        try:
+            h_entrada = datetime.strptime(conf_entrada.valor, "%H:%M:%S").time() if conf_entrada else time(7, 30)
+            h_tardanza = datetime.strptime(conf_tardanza.valor, "%H:%M:%S").time() if conf_tardanza else time(8, 0)
+            h_falta = datetime.strptime(conf_falta.valor, "%H:%M:%S").time() if conf_falta else time(9, 0)
+        except:
+            h_entrada = time(7, 30)
+            h_tardanza = time(8, 0)
+            h_falta = time(9, 0)
+
         hora_fin = time(13, 0)
         
-        if ahora < hora_inicio or ahora > hora_fin:
+        if ahora < h_entrada or ahora > hora_fin:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Fuera de horario laboral. Solo se permite escanear QR's y registrar asistencias entre las 7:00 AM y la 1:00 PM."
+                detail=f"Fuera de horario de ingreso. El registro inicia a las {h_entrada.strftime('%H:%M:%S')} y finaliza a las 1:00 PM. (Hora actual: {ahora.strftime('%H:%M:%S')})"
             )
         
-        if ahora <= limite_tardanza:
+        if ahora < h_tardanza:
             estado_enum = EstadoAsistencia.asistencia
-        else:
+        elif ahora < h_falta:
             estado_enum = EstadoAsistencia.tardanza
+        else:
+            estado_enum = EstadoAsistencia.inasistencia # Marked as Lack after 9:00 AM
+
 
     # Find student by QR code
     alumno = db.query(Alumno).filter(Alumno.codigo_qr == codigo_qr, Alumno.activo == True).first()
@@ -92,6 +128,19 @@ def registrar_asistencia_por_qr(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Alumno no encontrado o código QR inválido",
         )
+
+    # Security Check: Docentes only scan their assigned grades. Director can scan everyone.
+    docente = db.query(Docente).filter(Docente.dni == docente_dni).first()
+    if not docente:
+        raise HTTPException(status_code=404, detail="Docente que registra no encontrado")
+    
+    if docente.rol == RolDocente.docente:
+        grado_ids_asignados = [g.id for g in docente.grados]
+        if alumno.grado_id not in grado_ids_asignados:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"No tiene permisos para registrar asistencia a alumnos de otros grados (ID Alumno: {alumno.grado_id})."
+            )
 
     # Check if already registered today
     existing = (

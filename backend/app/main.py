@@ -6,13 +6,37 @@ import os
 
 from app.database import engine, Base
 from app.models import *  # noqa: F401, F403 - Import all models so Base.metadata knows about them
-from app.routers import auth, asistencia, alumnos, justificacion, dashboard, exportar, feriados
+from app.routers import auth, asistencia, alumnos, justificacion, dashboard, exportar, feriados, configuracion, recuperacion
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create tables if they don't exist
     Base.metadata.create_all(bind=engine)
+    
+    # Seed default configurations
+    from sqlalchemy.orm import Session
+    from app.database import SessionLocal
+    from app.models.configuracion import Configuracion
+    
+    db = SessionLocal()
+    try:
+        defaults = [
+            ("hora_entrada_inicial", "07:30:00", "Inicio de Escaneo (Inicial)"),
+            ("hora_asistencia_inicial", "08:15:00", "Inicio de Tardanza (Inicial)"),
+            ("hora_tardanza_inicial", "09:00:00", "Inicio de Falta (Inicial)"),
+            ("hora_entrada_primaria", "07:30:00", "Inicio de Escaneo (Primaria)"),
+            ("hora_asistencia_primaria", "08:00:00", "Inicio de Tardanza (Primaria)"),
+            ("hora_tardanza_primaria", "09:00:00", "Inicio de Falta (Primaria)"),
+        ]
+        for clave, valor, desc in defaults:
+            exists = db.query(Configuracion).filter(Configuracion.clave == clave).first()
+            if not exists:
+                db.add(Configuracion(clave=clave, valor=valor, descripcion=desc))
+        db.commit()
+    finally:
+        db.close()
+        
     yield
     # Shutdown: cleanup if needed
 
@@ -46,6 +70,8 @@ app.include_router(justificacion.router)
 app.include_router(dashboard.router)
 app.include_router(exportar.router)
 app.include_router(feriados.router)
+app.include_router(configuracion.router)
+app.include_router(recuperacion.router)
 
 
 @app.get("/", tags=["Root"])
